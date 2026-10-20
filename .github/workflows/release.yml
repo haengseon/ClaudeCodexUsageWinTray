@@ -1,0 +1,37 @@
+# v로 시작하는 태그를 올리면 exe를 빌드해서 GitHub Release에 붙인다.
+# 앱의 자동 업데이트는 latest 릴리스의 .exe를 받으므로, 태그와 AssemblyVersion이 다르면 빌드를 멈춘다.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $parts = @($tag.Split('.')); while ($parts.Count -lt 4) { $parts += '0' }
+          $want = $parts -join '.'
+          $have = (Select-String -Path ClaudeCodexUsageWinTray.cs -Pattern 'AssemblyVersion\("([^"]+)"\)').Matches[0].Groups[1].Value
+          if ($have -ne $want) { throw "태그 $tag 와 AssemblyVersion $have 가 다릅니다" }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          & C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /optimize /win32icon:assets\icon.ico /resource:assets\banner.png,banner.png /r:System.Web.Extensions.dll /out:ClaudeCodexUsageWinTray.exe ClaudeCodexUsageWinTray.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" ClaudeCodexUsageWinTray.exe --title "${{ github.ref_name }}" --generate-notes
