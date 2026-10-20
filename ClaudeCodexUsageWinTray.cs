@@ -21,7 +21,7 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("ClaudeCodexUsageWinTray")]
 [assembly: AssemblyProduct("ClaudeCodexUsageWinTray")]
-[assembly: AssemblyVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.2.0.0")]
 
 class Win
 {
@@ -564,8 +564,8 @@ class TaskbarWidget : Form
         return l;
     }
 
-    // 배너 비율에서 2pt 줄인 크기: 작업 표시줄 48px일 때 숫자 약 10.3px
-    static float Em(int h) { return h * 31f / 144f; }
+    // 작업 표시줄 48px일 때 숫자 약 11.7px (8.75pt)
+    static float Em(int h) { return h * 35f / 144f; }
     static int R(double v) { return (int)Math.Round(v); }
     static int WidgetWidth(float em, int blocks) { return R(em * 0.6) * 2 + R(em * 2.3) * blocks + R(em * 0.8) * (blocks - 1); }
 
@@ -661,6 +661,7 @@ class App : ApplicationContext
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer(), dock = new System.Windows.Forms.Timer(), loginWatch = new System.Windows.Forms.Timer();
     readonly SynchronizationContext ui;
     DateTime lastUpdateCheck = DateTime.MinValue, loginUntil;
+    Release available;   // 찾았지만 아직 설치하지 않은 새 버전 (수동 업데이트일 때)
     DateTime[] loginStamps;
     int busy;
 
@@ -730,6 +731,13 @@ class App : ApplicationContext
         }
         menu.Items.Add(every);
         menu.Items.Add(new ToolStripMenuItem(L.T("Windows 시작 시 자동 실행", "Start with Windows"), null, delegate { AutoStart = !AutoStart; }) { Checked = AutoStart });
+        var update = new ToolStripMenuItem(available != null ? L.T("업데이트 (새 버전 있음)", "Update (new version)") : L.T("업데이트", "Update"));
+        update.DropDownItems.Add(new ToolStripMenuItem(L.T("자동 업데이트", "Update automatically"), null, delegate { AutoUpdate = !AutoUpdate; }) { Checked = AutoUpdate });
+        update.DropDownItems.Add(available != null
+            ? new ToolStripMenuItem(available.Tag + L.T(" 설치", " — install now"), null, delegate { var r = available; Task.Run(() => Install(r)); })
+            : new ToolStripMenuItem(L.T("지금 확인", "Check now"), null, delegate { CheckNow(); }));
+        update.DropDownItems.Add(new ToolStripMenuItem(L.T("현재 버전 v", "Current version v") + Version.ToString(3)) { Enabled = false });
+        menu.Items.Add(update);
         menu.Items.Add(L.T("정보", "About"), null, delegate { using (var a = new About()) a.ShowDialog(); });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L.T("종료", "Quit"), null, delegate { Application.Exit(); });
@@ -839,6 +847,48 @@ class App : ApplicationContext
         set { using (var k = Registry.CurrentUser.CreateSubKey(SettingsKey)) k.SetValue("RefreshMinutes", value, RegistryValueKind.DWord); }
     }
 
+    // 자동 업데이트 켬/끔 (기본 켬). 끄면 하루 한 번 확인만 하고 설치는 메뉴에서 직접 한다
+    static bool AutoUpdate
+    {
+        get { using (var k = Registry.CurrentUser.OpenSubKey(SettingsKey)) return k == null || (k.GetValue("AutoUpdate") as int?) != 0; }
+        set { using (var k = Registry.CurrentUser.CreateSubKey(SettingsKey)) k.SetValue("AutoUpdate", value ? 1 : 0, RegistryValueKind.DWord); }
+    }
+
+    // 메뉴의 "지금 확인": 결과를 알려 주고, 새 버전이 있으면 설치할지 묻는다
+    void CheckNow()
+    {
+        Task.Run(() =>
+        {
+            Release r = null; bool failed = false;
+            try { r = Updater.Find(); } catch { failed = true; }
+            lastUpdateCheck = DateTime.Now; available = r;
+            ui.Post(delegate
+            {
+                if (failed) Ask(L.T("업데이트를 확인하지 못했습니다. 네트워크를 확인해 주세요.", "Couldn't check for updates. Please check your network."), false);
+                else if (r == null) Ask(L.T("최신 버전입니다 (v", "You're up to date (v") + Version.ToString(3) + ").", false);
+                else if (Ask(r.Tag + L.T(" 버전이 있습니다. 지금 설치할까요?\n설치하면 프로그램이 잠깐 다시 시작됩니다.", " is available. Install it now?\nThe app restarts briefly."), true))
+                    Task.Run(() => Install(r));
+            }, null);
+        });
+    }
+
+    void Install(Release r)
+    {
+        if (!Updater.Install(r, ui))
+            ui.Post(delegate { Ask(L.T("업데이트를 설치하지 못했습니다. 잠시 뒤 다시 시도해 주세요.", "Couldn't install the update. Please try again later."), false); }, null);
+    }
+
+    // 작업 표시줄 위에서 띄우는 알림창이 다른 창 뒤로 숨지 않게 맨 위 소유 창을 붙인다
+    static bool Ask(string text, bool yesNo)
+    {
+        using (var owner = new Form { TopMost = true, ShowInTaskbar = false, FormBorderStyle = FormBorderStyle.None, Size = new Size(0, 0), StartPosition = FormStartPosition.CenterScreen })
+        {
+            owner.Show();
+            return MessageBox.Show(owner, text, "ClaudeCodexUsageWinTray", yesNo ? MessageBoxButtons.YesNo : MessageBoxButtons.OK,
+                yesNo ? MessageBoxIcon.Question : MessageBoxIcon.Information) == DialogResult.Yes;
+        }
+    }
+
     static bool AutoStart
     {
         get { using (var k = Registry.CurrentUser.OpenSubKey(RunKey)) return k != null && k.GetValue(RunName) != null; }
@@ -864,7 +914,12 @@ class App : ApplicationContext
                 }
             }
             finally { busy = 0; ui.Post(delegate { flyout.Busy = false; Redraw(); }, null); }
-            if (DateTime.Now - lastUpdateCheck > TimeSpan.FromHours(24)) { lastUpdateCheck = DateTime.Now; Updater.Check(ui); }
+            if (DateTime.Now - lastUpdateCheck > TimeSpan.FromHours(24))
+            {   // 하루 한 번 확인: 자동 업데이트면 바로 설치, 아니면 메뉴에 "설치" 항목만 띄운다
+                lastUpdateCheck = DateTime.Now;
+                try { available = Updater.Find(); } catch { }
+                if (available != null && AutoUpdate) Updater.Install(available, ui);
+            }
         });
     }
 
@@ -937,40 +992,47 @@ static class Updater
         });
     }
 
-    public static void Check(SynchronizationContext ui)
+    // 지금보다 새 릴리스가 있으면 그 정보를, 없으면 null (네트워크 오류는 예외로 올린다)
+    public static Release Find()
     {
+        var json = new JavaScriptSerializer();
+        var req = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + App.Repo + "/releases/latest");
+        req.UserAgent = "ClaudeCodexUsageWinTray"; req.Accept = "application/vnd.github+json"; req.Timeout = 15000;
+        string body;
+        using (var res = req.GetResponse()) using (var r = new StreamReader(res.GetResponseStream())) body = r.ReadToEnd();
+        var rel = (Dictionary<string, object>)json.DeserializeObject(body);
+        var tag = (string)rel["tag_name"];
+        if (new Version(tag.TrimStart('v', 'V')) <= App.Version) return null;   // 1.0.0 은 1.0.0.0 보다 작게 비교되어 같은 버전도 건너뛴다
+        foreach (Dictionary<string, object> a in (object[])rel["assets"])
+            if (((string)a["name"]).EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                return new Release { Tag = tag, Url = (string)a["browser_download_url"], Size = Convert.ToInt64(a["size"]),
+                    Digest = a.ContainsKey("digest") ? a["digest"] as string : null };
+        return null;
+    }
+
+    // 내려받아 검사한 뒤 같은 자리에서 교체하고 새 버전을 띄운다. 실패하면 false (원래 exe는 그대로)
+    public static bool Install(Release rel, SynchronizationContext ui)
+    {
+        string tmp = Exe + ".new", old = Exe + ".old";
         try
         {
-            var json = new JavaScriptSerializer();
-            var req = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + App.Repo + "/releases/latest");
-            req.UserAgent = "ClaudeCodexUsageWinTray"; req.Accept = "application/vnd.github+json"; req.Timeout = 15000;
-            string body;
-            using (var res = req.GetResponse()) using (var r = new StreamReader(res.GetResponseStream())) body = r.ReadToEnd();
-            var rel = (Dictionary<string, object>)json.DeserializeObject(body);
-            var latest = new Version(((string)rel["tag_name"]).TrimStart('v', 'V'));
-            if (latest <= App.Version) return;   // 1.0.0 은 1.0.0.0 보다 작게 비교되어 같은 버전도 건너뛴다
-
-            foreach (Dictionary<string, object> a in (object[])rel["assets"])
-            {
-                if (!((string)a["name"]).EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
-                string tmp = Exe + ".new", old = Exe + ".old";
-                using (var wc = new WebClient()) { wc.Headers["User-Agent"] = "ClaudeCodexUsageWinTray"; wc.DownloadFile((string)a["browser_download_url"], tmp); }
-                var bytes = File.ReadAllBytes(tmp);
-                bool ok = bytes.Length == Convert.ToInt64(a["size"]) && bytes.Length > 2 && bytes[0] == 'M' && bytes[1] == 'Z';
-                var digest = a.ContainsKey("digest") ? a["digest"] as string : null;   // GitHub가 주는 sha256 값이 있으면 맞춰 본다
-                if (ok && digest != null && digest.StartsWith("sha256:"))
-                    using (var sha = SHA256.Create())
-                        ok = BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").Equals(digest.Substring(7), StringComparison.OrdinalIgnoreCase);
-                if (!ok) { File.Delete(tmp); return; }
-                if (File.Exists(old)) File.Delete(old);
-                File.Move(Exe, old);
-                try { File.Move(tmp, Exe); }
-                catch { File.Move(old, Exe); throw; }
-                Process.Start(Exe, "--updated");
-                ui.Post(delegate { Application.Exit(); }, null);
-                return;
-            }
+            using (var wc = new WebClient()) { wc.Headers["User-Agent"] = "ClaudeCodexUsageWinTray"; wc.DownloadFile(rel.Url, tmp); }
+            var bytes = File.ReadAllBytes(tmp);
+            bool ok = bytes.Length == rel.Size && bytes.Length > 2 && bytes[0] == 'M' && bytes[1] == 'Z';
+            if (ok && rel.Digest != null && rel.Digest.StartsWith("sha256:"))   // GitHub가 주는 sha256 값이 있으면 맞춰 본다
+                using (var sha = SHA256.Create())
+                    ok = BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").Equals(rel.Digest.Substring(7), StringComparison.OrdinalIgnoreCase);
+            if (!ok) { File.Delete(tmp); return false; }
+            if (File.Exists(old)) File.Delete(old);
+            File.Move(Exe, old);
+            try { File.Move(tmp, Exe); }
+            catch { File.Move(old, Exe); throw; }
+            Process.Start(Exe, "--updated");
+            ui.Post(delegate { Application.Exit(); }, null);
+            return true;
         }
-        catch { /* 업데이트 실패는 다음 주기에 재시도 */ }
+        catch { try { File.Delete(tmp); } catch { } return false; }
     }
 }
+
+class Release { public string Tag, Url, Digest; public long Size; }
