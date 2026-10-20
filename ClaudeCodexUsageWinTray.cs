@@ -921,10 +921,20 @@ static class Updater
 {
     static string Exe { get { return Application.ExecutablePath; } }
 
+    // 업데이트 직후엔 이전 프로세스가 아직 끝나는 중이라 .old가 잠겨 있다: 30초 동안 1초마다 다시 지운다
     public static void Cleanup()
     {
-        foreach (var f in new[] { Exe + ".old", Exe + ".new" })
-            try { if (File.Exists(f)) File.Delete(f); } catch { }
+        Task.Run(() =>
+        {
+            for (int i = 0; i < 30; i++)
+            {
+                bool left = false;
+                foreach (var f in new[] { Exe + ".old", Exe + ".new" })
+                    try { if (File.Exists(f)) File.Delete(f); } catch { left = true; }
+                if (!left) return;
+                Thread.Sleep(1000);
+            }
+        });
     }
 
     public static void Check(SynchronizationContext ui)
