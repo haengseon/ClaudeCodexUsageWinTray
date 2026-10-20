@@ -21,7 +21,7 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("ClaudeCodexUsageWinTray")]
 [assembly: AssemblyProduct("ClaudeCodexUsageWinTray")]
-[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyVersion("0.2.1.0")]
 
 class Win
 {
@@ -567,7 +567,11 @@ class TaskbarWidget : Form
     // 작업 표시줄 48px일 때 숫자 약 11.7px (8.75pt)
     static float Em(int h) { return h * 35f / 144f; }
     static int R(double v) { return (int)Math.Round(v); }
-    static int WidgetWidth(float em, int blocks) { return R(em * 0.6) * 2 + R(em * 2.3) * blocks + R(em * 0.8) * (blocks - 1); }
+    // 폭을 줄여 둔 이유: Windows 11 작업 표시줄 버튼은 알림 영역 왼쪽 약 58px(48px 높이 기준)까지만 비워 둬서, 그보다 넓으면 마지막 버튼과 겹친다
+    static int Pad(float em) { return R(em * 0.25); }
+    static int BlockW(float em) { return R(em * 1.9); }
+    static int Gap(float em) { return R(em * 0.5); }
+    static int WidgetWidth(float em, int blocks) { return Pad(em) * 2 + BlockW(em) * blocks + Gap(em) * (blocks - 1); }
 
     public void Redraw()
     {
@@ -578,14 +582,15 @@ class TaskbarWidget : Form
     Bitmap Draw(Size sz)
     {
         float em = Em(sz.Height);
-        int bw = R(em * 2.3), gap = R(em * 0.8), pad = R(em * 0.6);
-        int bar = Math.Max(2, R(sz.Height / 24.0)), digit = R(em * 0.7);   // Segoe UI 숫자 높이 ≈ 0.7em
+        int bw = BlockW(em), gap = Gap(em), pad = Pad(em);
+        float fontPx = em - sz.Height / 48f;   // 글자는 1px(48px 기준) 작게
+        int bar = Math.Max(3, R(sz.Height / 24.0) + 1), digit = R(fontPx * 0.7);   // 막대는 1px 두껍게. Segoe UI 숫자 높이 ≈ 0.7em
         int rowH = digit + Math.Max(2, R(em / 5)) + bar, rowGap = Math.Max(3, R(em * 0.35));
         int top = (sz.Height - rowH * 2 - rowGap) / 2, inset = Math.Max(2, sz.Height / 12);
         var fg = Theme.Fg;
         var bmp = new Bitmap(sz.Width, sz.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
-        using (var font = new Font("Segoe UI", em, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (var font = new Font("Segoe UI", fontPx, FontStyle.Bold, GraphicsUnit.Pixel))
         using (var text = new SolidBrush(fg))
         using (var track = new SolidBrush(Color.FromArgb(Theme.Light ? 50 : 70, fg)))
         using (var bg = new SolidBrush(Color.FromArgb(hover ? (Theme.Light ? 16 : 22) : 1, fg)))   // 알파 0인 픽셀은 클릭이 통과하므로 최소 1
@@ -594,7 +599,7 @@ class TaskbarWidget : Form
             g.PixelOffsetMode = PixelOffsetMode.Half;   // 막대 가장자리를 픽셀에 딱 맞춘다
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             using (var path = Round(new Rectangle(0, inset, sz.Width, sz.Height - inset * 2), inset)) g.FillPath(bg, path);
-            float ascent = font.FontFamily.GetCellAscent(font.Style) * em / font.FontFamily.GetEmHeight(font.Style);
+            float ascent = font.FontFamily.GetCellAscent(font.Style) * fontPx / font.FontFamily.GetEmHeight(font.Style);
             var fmt = StringFormat.GenericTypographic;
             var blocks = Blocks();
             for (int c = 0; c < blocks.Count; c++)
