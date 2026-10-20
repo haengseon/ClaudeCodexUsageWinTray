@@ -31,7 +31,7 @@ Claude Codex
 
 - Small columns sit just left of the notification area. Orange is Claude, green is Codex. You only get a column for what you're signed in to, and a new one appears on its own after you sign in.
 - Click them to see what `/usage` would tell you: every limit, when it resets, and how long until then. There's a refresh button at the bottom if you want fresh numbers right away.
-- It checks every 5 minutes by default. Right-click to pick anything from 1 to 60 minutes, see whether each one is signed in, turn on start with Windows, or quit.
+- It checks every 5 minutes by default. Right-click to pick anything from 1 to 60 minutes, see whether each one is signed in, turn on start with Windows, choose automatic or manual updates, or quit.
 - A gauge turns red once you pass 80%.
 - Menus follow your Windows display language (English or Korean), and dates and times follow your region format.
 
@@ -45,7 +45,7 @@ You'll need Windows 10 or 11. It works with the command-line tools or the deskto
 2. Put it in any folder and run it. There's no installer.
 3. The numbers show up next to the clock after a few seconds.
 
-To have it start with Windows, right-click the numbers and turn on **Start with Windows**. It updates itself when a new release comes out.
+To have it start with Windows, right-click the numbers and turn on **Start with Windows**. It updates itself when a new release comes out. If you'd rather decide yourself, turn off **Update automatically** under **Update** and use **Check now** when you like.
 
 ## What it accesses
 
@@ -57,9 +57,9 @@ It runs as your normal user. No admin rights, no telemetry, and nothing is sent 
 | `%USERPROFILE%\.codex\auth.json` | Same for Codex. |
 | `api.anthropic.com`, `platform.claude.com`, `console.anthropic.com` | Claude usage (every 5 minutes by default) and token renewal |
 | `chatgpt.com`, `auth.openai.com` | Codex usage (every 5 minutes by default) and token renewal |
-| `api.github.com`, `github.com` | Checks for a new release once a day and swaps the exe in place |
+| `api.github.com`, `github.com` | Checks for a new release once a day (or when you pick **Check now**). Installs it in place automatically, unless you turned that off. |
 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | Only when you turn on start with Windows |
-| `HKCU\Software\ClaudeCodexUsageWinTray` | Only when you change the refresh interval |
+| `HKCU\Software\ClaudeCodexUsageWinTray` | Only when you change the refresh interval or the update setting |
 | `claude auth login`, `codex login`, the Claude or Codex app | Only when you click a sign-in item. It uses the CLI if you have it, otherwise the app, otherwise it opens the download page. |
 
 If you've set `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, it looks there instead, same as the CLIs.
@@ -93,7 +93,7 @@ A vertical taskbar (left or right edge on Windows 10) isn't supported. Otherwise
 <details>
 <summary><b>How do I remove it?</b></summary>
 <br>
-Right-click, turn off <b>Start with Windows</b>, pick <b>Quit</b>, then delete the exe. If you changed the refresh interval, you can also delete <code>HKCU\Software\ClaudeCodexUsageWinTray</code>.
+Right-click, turn off <b>Start with Windows</b>, pick <b>Quit</b>, then delete the exe. If you changed the refresh interval or the update setting, you can also delete <code>HKCU\Software\ClaudeCodexUsageWinTray</code>.
 </details>
 
 ## License
